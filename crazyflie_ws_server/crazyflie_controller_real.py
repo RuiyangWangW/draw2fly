@@ -45,14 +45,14 @@ class CrazyflieController:
         time.sleep(0.5)
 
         # Ascend smoothly to target height
-        self.cf.commander.send_hover_setpoint(0, 0, height, 0)
+        self.cf.commander.send_hover_setpoint(0, 0, 0, height)
         time.sleep(duration)
 
     async def land(self, duration: float = 3.0):
         print("🛬 Landing")
         for i in range(10, -1, -1):
             z = i * 0.1
-            self.cf.commander.send_hover_setpoint(0, 0, z, 0)
+            self.cf.commander.send_hover_setpoint(0, 0, 0, z)
             time.sleep(duration / 10)
         self.cf.commander.send_stop_setpoint()
         print("🛑 Motors stopped")
@@ -68,5 +68,5 @@ class CrazyflieController:
             time.sleep(0.5)
 
         # Hover at final point
-        self.cf.commander.send_hover_setpoint(0, 0, 1.0, 0)
+        self.cf.commander.send_hover_setpoint(0, 0, 0, 1.0)
         time.sleep(1)

@@ -48,7 +48,7 @@ async def handler(websocket):
 async def main():
     local_ip = get_local_ip()
     print("🌐 Your local IP address is:", local_ip)
-    print(f"✅ Use this in your Android app: 10.0.2.2")
+    print(f"✅ Use this in your Android app: {local_ip}")
     async with websockets.serve(handler, "0.0.0.0", 9090):
         print("🚀 WebSocket server running on ws://0.0.0.0:9090")
         await asyncio.Future()  # Run forever
