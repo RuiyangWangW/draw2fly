@@ -1,16 +1,15 @@
 import asyncio
 import json
 import websockets
-from crazyflie_controller import CrazyflieController
 import socket
+from crazyflie_controller_real import CrazyflieController
 
-# Optional: mock mode (set to False when flying for real)
+# Initialize the Crazyflie controller
 cf = CrazyflieController()
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # connect to a public IP, doesn't actually send data
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
     except Exception:
@@ -28,10 +27,12 @@ async def handler(websocket):
 
             if isinstance(data, dict) and "command" in data:
                 cmd = data["command"]
+
                 if cmd == "takeoff":
-                    height = float(data.get("height", 1.0))
+                    height = float(data.get("height", 0.5))
                     print(f"🚁 Takeoff requested to {height:.2f} m")
                     await cf.takeoff(height)
+
                 elif cmd == "land":
                     print("🛬 Land requested")
                     await cf.land()
@@ -40,6 +41,7 @@ async def handler(websocket):
                 print(f"📍 Waypoints received: {len(data)} points")
                 for i, pt in enumerate(data):
                     print(f"   {i+1}: x = {pt['x']:.2f}, y = {pt['y']:.2f}")
+
                 await cf.follow_waypoints(data)
 
         except Exception as e:
@@ -51,7 +53,7 @@ async def main():
     print(f"✅ Use this in your Android app: {local_ip}")
     async with websockets.serve(handler, "0.0.0.0", 9090):
         print("🚀 WebSocket server running on ws://0.0.0.0:9090")
-        await asyncio.Future()  # Run forever
+        await asyncio.Future()  # Keep server running
 
 if __name__ == "__main__":
     asyncio.run(main())
