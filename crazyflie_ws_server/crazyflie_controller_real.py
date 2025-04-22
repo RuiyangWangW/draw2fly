@@ -1,19 +1,19 @@
+import asyncio
 import time
-import threading
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
 
 class CrazyflieController:
     def __init__(self):
-        # Initialize CRTP communication drivers
         cflib.crtp.init_drivers()
         self.uri = "radio://0/80/2M"
         self.cf = Crazyflie()
         self.connected = False
 
-        # Hover control flags
+        # Hovering control
         self.hovering = False
-        self.hover_thread = None
+        self.hover_height = 0.5
+        self.hover_task = None
 
         # Register callbacks
         self.cf.connected.add_callback(self._on_connected)
@@ -44,68 +44,88 @@ class CrazyflieController:
         print(f"⚠️ Connection lost: {msg}")
         self.connected = False
 
-    def _hover_loop(self, z=0.5):
-        while self.hovering:
-            self.cf.commander.send_hover_setpoint(0.0, 0.0, 0.0, z)
-            time.sleep(0.05)
+    async def _hover_loop(self):
+        try:
+            while self.hovering:
+                self.cf.commander.send_hover_setpoint(0.0, 0.0, 0.0, self.hover_height)
+                await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            print("⛔ Hover loop cancelled")
 
-    def start_hover(self, z=0.5):
+    async def start_hover(self, z=0.5):
         if not self.hovering:
             self.hovering = True
-            self.hover_thread = threading.Thread(target=self._hover_loop, args=(z,))
-            self.hover_thread.start()
-            print(f"🌀 Started persistent hover at {z:.2f} m")
+            self.hover_height = z
+            self.hover_task = asyncio.create_task(self._hover_loop())
+            print(f"🌀 Started hover at {z:.2f} m")
 
-    def stop_hover(self):
+    async def stop_hover(self, halt_motors=False):
         if self.hovering:
             self.hovering = False
-            if self.hover_thread:
-                self.hover_thread.join()
-                self.hover_thread = None
-            self.cf.commander.send_stop_setpoint()
-            print("🛑 Hovering stopped and motors halted")
+            if self.hover_task:
+                self.hover_task.cancel()
+                try:
+                    await self.hover_task
+                except asyncio.CancelledError:
+                    pass
+                self.hover_task = None
+            if halt_motors:
+                self.cf.commander.send_stop_setpoint()
+                print("🛑 Hovering stopped and motors halted")
+            else:
+                print("🛑 Hovering loop stopped, drone maintains last setpoint")
 
     async def takeoff(self, height: float = 0.5, duration: float = 3.0):
         print(f"🚁 Taking off to {height:.2f} m")
+        await self.stop_hover()
 
-        self.stop_hover()  # In case called twice
+        self.hovering = True
+        self.hover_height = 0.1
+        self.hover_task = asyncio.create_task(self._hover_loop())
 
-        self.cf.commander.send_hover_setpoint(0.0, 0.0, 0.0, 0.1)
-        time.sleep(0.5)
+        steps = int(duration / 0.05)
+        for i in range(steps):
+            self.hover_height = 0.1 + (height - 0.1) * (i / steps)
+            await asyncio.sleep(0.05)
 
-        start_time = time.time()
-        while time.time() - start_time < duration:
-            self.cf.commander.send_hover_setpoint(0.0, 0.0, 0.0, height)
-            time.sleep(0.05)
-
-        self.start_hover(z=height)
-        print(f"✅ Hovering at {height:.2f} m and waiting for future commands")
+        self.hover_height = height
+        print(f"✅ Hovering at {height:.2f} m")
 
     async def land(self, duration: float = 3.0):
         print("🛬 Landing")
-        self.stop_hover()
+        if not self.hovering:
+            await self.start_hover(z=0.5)
 
-        steps = 20
-        for i in range(steps, -1, -1):
-            z = i * (0.5 / steps)
-            self.cf.commander.send_hover_setpoint(0.0, 0.0, 0.0, z)
-            time.sleep(duration / steps)
+        steps = int(duration / 0.05)
+        initial_height = self.hover_height
 
-        self.cf.commander.send_stop_setpoint()
-        print("🛑 Motors stopped")
+        for i in range(steps):
+            self.hover_height = initial_height * (1 - i / steps)
+            await asyncio.sleep(0.05)
 
-    async def follow_waypoints(self, points):
+        self.hover_height = 0.0
+        await asyncio.sleep(0.1)
+        await self.stop_hover(halt_motors=True)
+
+    async def follow_waypoints(self, points, speed=0.5):
         print(f"📍 Executing {len(points)} waypoints")
-        self.stop_hover()
+        await self.stop_hover()
 
+        dt = 0.05  # 20 Hz
         for i, pt in enumerate(points):
             x = float(pt["x"])
             y = float(pt["y"])
-            z = 0.5  # fixed height
+            z = 0.5
             print(f"   ➤ Moving to ({x:.2f}, {y:.2f}, {z:.2f})")
-            self.cf.commander.send_position_setpoint(x, y, z, 0.0)
-            time.sleep(0.5)
 
-        # After reaching final point, hold hover again
-        self.start_hover(z=0.5)
+            steps = int(1.0 / dt)
+            for j in range(steps):
+                r = (j + 1) / steps
+                self.cf.commander.send_position_setpoint(x * r, y * r, z, 0.0)
+                await asyncio.sleep(dt)
+
+            self.cf.commander.send_position_setpoint(x, y, z, 0.0)
+            await asyncio.sleep(0.2)
+
+        await self.start_hover(z=0.5)
         print("⏸️ Resumed hover after path")

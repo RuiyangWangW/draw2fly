@@ -1,11 +1,9 @@
 import asyncio
 import json
-import websockets
 import socket
+import websockets
+from functools import partial
 from crazyflie_controller_real import CrazyflieController
-
-# Initialize the Crazyflie controller
-cf = CrazyflieController()
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -17,7 +15,7 @@ def get_local_ip():
     finally:
         s.close()
 
-async def handler(websocket):
+async def handler(websocket, path, cf: CrazyflieController):
     print("✅ Client connected")
 
     async for message in websocket:
@@ -51,9 +49,15 @@ async def main():
     local_ip = get_local_ip()
     print("🌐 Your local IP address is:", local_ip)
     print(f"✅ Use this in your Android app: {local_ip}")
-    async with websockets.serve(handler, "0.0.0.0", 9090):
+
+    cf = CrazyflieController()  # Instantiate inside event loop context
+
+    # Partially apply cf to handler
+    bound_handler = partial(handler, cf=cf)
+
+    async with websockets.serve(bound_handler, "0.0.0.0", 9090):
         print("🚀 WebSocket server running on ws://0.0.0.0:9090")
-        await asyncio.Future()  # Keep server running
+        await asyncio.Future()  # Keeps the server running
 
 if __name__ == "__main__":
     asyncio.run(main())
