@@ -6,7 +6,7 @@ from cflib.crazyflie import Crazyflie
 class CrazyflieController:
     def __init__(self):
         cflib.crtp.init_drivers()
-        self.uri = "radio://0/80/2M"
+        self.uri = "radio://0/10/2M/E7E7E7E703"
         self.cf = Crazyflie()
         self.connected = False
 
